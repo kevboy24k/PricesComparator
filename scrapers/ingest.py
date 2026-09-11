@@ -1,13 +1,13 @@
 import argparse
 import logging
 import os
-import re
 from pathlib import Path
 
 import mysql.connector
 from dotenv import load_dotenv
 
-from core.product_matcher import normalize
+from core.product_matcher import classify_match
+from core.utils import utils
 from stores.kemik import KemikScraper
 from stores.intelaf import IntelafScraper
 from stores.pacifiko import PacifikoScraper
@@ -32,145 +32,57 @@ def connect_db():
     )
 
 
-def same_model(scraped_name: str, model: str | None) -> bool:
-    if not model:
-        return False
-    return re.search(rf"(?<![a-z0-9]){re.escape(normalize(model))}(?![a-z0-9])", normalize(scraped_name)) is not None
-
-
-def find_product(cursor, scraped_name: str):
+def load_catalog(cursor):
     cursor.execute(
-        "SELECT idproducto,nombre,modelo FROM producto WHERE estado=1"
+        "SELECT idproducto,nombre,modelo,sku_global,"
+        "(SELECT nombre FROM categoria WHERE idcategoria=producto.idcategoria) "
+        "FROM producto WHERE estado=1"
     )
-    products = cursor.fetchall()
-    model_matches = [p for p in products if same_model(scraped_name, p[2])]
-    if len(model_matches) == 1:
-        return model_matches[0]
-    return None
+    return [
+        {"idproducto": row[0], "name": row[1], "model": row[2],
+         "sku_global": row[3], "category": row[4]}
+        for row in cursor.fetchall()
+    ]
 
 
-def ingest(store: str, query: str) -> None:
-    scraper = SCRAPERS[store](delay=1.5)
-    results = scraper.search(query)
-    db = connect_db()
-    cursor = db.cursor()
-    log_id = None
-    updated = 0
-    errors = 0
+def find_product(cursor, item: dict):
+    return classify_match(item, load_catalog(cursor))
 
+
+def valid_offer(item: dict) -> bool:
+    from math import isfinite
     try:
-        cursor.execute(
-            "SELECT idtienda FROM tienda WHERE LOWER(nombre)=LOWER(%s) AND estado=1",
-            (store,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise RuntimeError(f"La tienda '{store}' no existe en la tabla tienda")
-        store_id = row[0]
+        return (bool(str(item.get("name") or "").strip())
+                and str(item.get("url") or "").startswith(("https://", "http://"))
+                and isfinite(float(item.get("price"))) and float(item["price"]) > 0)
+    except (TypeError, ValueError):
+        return False
 
-        cursor.execute(
-            "INSERT INTO scraper_log (idtienda,fecha_inicio,estado) VALUES (%s,NOW(),'ejecutando')",
-            (store_id,),
-        )
-        log_id = cursor.lastrowid
 
-        for item in results:
-            try:
-                name = (item.get("name") or "").strip()
-                price = item.get("price")
-                url = item.get("url")
-                product = find_product(cursor, name)
+def revalidate_offers(cursor, store_id: int, catalog: list[dict]) -> int:
+    """Retirar asociaciones antiguas inválidas conservando su historial de precios."""
+    products = {product["idproducto"]: product for product in catalog}
+    cursor.execute(
+        "SELECT idproducto_tienda,idproducto,nombre_tienda,sku_tienda "
+        "FROM producto_tienda WHERE idtienda=%s AND estado=1", (store_id,)
+    )
+    invalidated = 0
+    for offer_id, product_id, name, sku in cursor.fetchall():
+        product = products.get(product_id)
+        if not product:
+            continue
+        result = classify_match({"name": name, "sku": sku}, [product])
+        if result["classification"] != "automatico":
+            cursor.execute("UPDATE producto_tienda SET estado=0 WHERE idproducto_tienda=%s", (offer_id,))
+            utils.report_error("Oferta %s desactivada: %s", offer_id, result["reason"])
+            invalidated += 1
+    return invalidated
 
-                if not product:
-                    cursor.execute(
-                        "SELECT idmatch FROM producto_match_pendiente "
-                        "WHERE estado='pendiente' AND ((idtienda=%s AND url=%s) "
-                        "OR (idtienda IS NULL AND nombre_detectado=%s)) LIMIT 1",
-                        (store_id, url, name),
-                    )
-                    pending = cursor.fetchone()
-                    if pending:
-                        cursor.execute(
-                            "UPDATE producto_match_pendiente SET idtienda=%s,"
-                            "nombre_detectado=%s,nombre_tienda=%s,sku_tienda=%s,url=%s,"
-                            "imagen=%s,precio=%s,moneda=%s,disponible=%s WHERE idmatch=%s",
-                            (store_id, name, name, item.get("sku"), url, item.get("image"),
-                             price, item.get("currency", "GTQ"), int(bool(item.get("available"))), pending[0]),
-                        )
-                    else:
-                        cursor.execute(
-                            "INSERT INTO producto_match_pendiente "
-                            "(idtienda,nombre_detectado,nombre_tienda,sku_tienda,url,imagen,"
-                            "precio,moneda,disponible,puntuacion,estado) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pendiente')",
-                            (store_id, name, name, item.get("sku"), url, item.get("image"),
-                             price, item.get("currency", "GTQ"), int(bool(item.get("available"))), 0),
-                        )
-                    logging.warning("Sin producto para emparejar: %s", name)
-                    errors += 1
-                    continue
-                if price is None or not url:
-                    raise ValueError("resultado sin precio o URL")
 
-                product_id = product[0]
-                cursor.execute(
-                    "INSERT INTO producto_tienda "
-                    "(idproducto,idtienda,nombre_tienda,sku_tienda,url,imagen,disponibilidad) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s) "
-                    "ON DUPLICATE KEY UPDATE nombre_tienda=VALUES(nombre_tienda), "
-                    "url=VALUES(url), imagen=VALUES(imagen), disponibilidad=VALUES(disponibilidad), "
-                    "actualizado_en=NOW()",
-                    (product_id, store_id, name, item.get("sku"), url,
-                     item.get("image"), int(bool(item.get("available")))),
-                )
-                cursor.execute(
-                    "SELECT idproducto_tienda FROM producto_tienda "
-                    "WHERE idproducto=%s AND idtienda=%s",
-                    (product_id, store_id),
-                )
-                product_store_id = cursor.fetchone()[0]
-                available = int(bool(item.get("available")))
-                cursor.execute(
-                    "SELECT precio,disponible FROM precio WHERE idproducto_tienda=%s "
-                    "ORDER BY fecha DESC,idprecio DESC LIMIT 1",
-                    (product_store_id,),
-                )
-                previous = cursor.fetchone()
-                if not previous or float(previous[0]) != float(price) or int(previous[1]) != available:
-                    previous_price = previous[0] if previous else None
-                    cursor.execute(
-                        "INSERT INTO precio "
-                        "(idproducto_tienda,precio,precio_anterior,moneda,disponible) "
-                        "VALUES (%s,%s,%s,%s,%s)",
-                        (product_store_id, price, previous_price,
-                         item.get("currency", "GTQ"), available),
-                    )
-                updated += 1
-            except Exception as error:
-                logging.exception("Error procesando %s: %s", item.get("name"), error)
-                errors += 1
-
-        status = "completado" if errors == 0 else "error"
-        cursor.execute(
-            "UPDATE scraper_log SET fecha_fin=NOW(),productos_encontrados=%s, "
-            "productos_actualizados=%s,errores=%s,estado=%s WHERE idscraper_log=%s",
-            (len(results), updated, errors, status, log_id),
-        )
-        db.commit()
-        logging.info("Ingesta finalizada: encontrados=%s actualizados=%s errores=%s",
-                     len(results), updated, errors)
-    except Exception:
-        db.rollback()
-        if log_id:
-            cursor.execute(
-                "UPDATE scraper_log SET fecha_fin=NOW(),estado='error',mensaje=%s "
-                "WHERE idscraper_log=%s", ("Error general de ingesta", log_id)
-            )
-            db.commit()
-        raise
-    finally:
-        cursor.close()
-        db.close()
+def ingest(store: str, query: str) -> dict:
+    # Ambos puntos de entrada usan exactamente las mismas reglas automáticas.
+    from live_ingest import run
+    return run(query, stores=(store,))
 
 
 if __name__ == "__main__":

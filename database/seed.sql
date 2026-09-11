@@ -1,5 +1,5 @@
 USE compara_tech_gt;
-INSERT IGNORE INTO categoria (nombre) VALUES ('Procesadores'),('Tarjetas gráficas'),('Memorias RAM'),('SSD'),('Motherboards'),('Monitores'),('Laptops');
+INSERT IGNORE INTO categoria (nombre) VALUES ('Procesadores'),('Tarjetas gráficas'),('Memorias RAM'),('SSD'),('Motherboards'),('Monitores'),('Laptops'),('Computadoras de escritorio'),('Teclados'),('Mouse'),('Audio y audífonos'),('Webcams'),('Redes'),('Impresoras'),('Tablets'),('Celulares'),('Consolas y videojuegos'),('Gabinetes'),('Fuentes de poder'),('Refrigeración'),('Accesorios tecnológicos');
 INSERT IGNORE INTO marca (nombre) VALUES ('AMD'),('NVIDIA'),('Kingston'),('Samsung');
 INSERT IGNORE INTO tienda (nombre,url,logo) VALUES ('Kemik','https://www.kemik.gt',''),('Intelaf','https://www.intelaf.com',''),('Pacifiko','https://www.pacifiko.com','');
 INSERT IGNORE INTO producto (idcategoria,idmarca,nombre,modelo,sku_global,imagen,descripcion) VALUES (1,1,'AMD Ryzen 5 7600','7600','AMD-RYZEN-5-7600','https://placehold.co/480x360/e8f0ff/21457a?text=Ryzen+5+7600','Procesador AMD de 6 núcleos para socket AM5.');

@@ -69,6 +69,11 @@ class IngestionTests(unittest.TestCase):
         self.assertIsNone(live_ingest.catalog_product(cursor, 'RTX 5070', offer('Laptop RTX 5070')))
         cursor.execute.assert_not_called()
 
+    def test_generic_brand_or_category_query_cannot_reuse_a_catalog_product(self):
+        cursor = MagicMock()
+        self.assertIsNone(live_ingest.catalog_product(cursor, 'Audifonos Xiaomi', offer('Audifonos Xiaomi Redmi Buds 6')))
+        cursor.execute.assert_not_called()
+
     def test_new_product_uses_full_query_and_real_brand_id(self):
         cursor = MagicMock()
         cursor.fetchone.side_effect = [(2,), (42,), (7, 'NVIDIA RTX 5070 Ti', 'RTX 5070 Ti', 'AUTO-NVIDIA-RTX-5070-TI')]

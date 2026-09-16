@@ -32,6 +32,33 @@ TECHNOLOGY_CATEGORIES = {
 }
 
 
+# Una marca o el nombre de una categoría describe un conjunto de productos, no
+# un producto canónico. Si se convirtieran en un producto de catálogo, la
+# siguiente búsqueda de esa categoría terminaría agregando sus ofertas al mismo
+# contenedor (por ejemplo, "Xiaomi" → audífonos de distintas líneas).
+GENERIC_QUERY_TOKENS = {
+    'accesorio', 'accesorios', 'adaptador', 'adaptadores', 'aio', 'altavoz',
+    'altavoces', 'audifono', 'audifonos', 'bocina', 'bocinas', 'cable',
+    'cables', 'camara', 'case', 'celular', 'celulares', 'chasis', 'consola',
+    'consolas', 'computadora', 'computadoras', 'cpu', 'de', 'del', 'desktop',
+    'disco', 'discos', 'en', 'fuente', 'fuentes', 'gabinete', 'gabinetes',
+    'gpu', 'headphone', 'headphones', 'headset', 'impresora', 'impresoras',
+    'keyboard', 'laptop', 'laptops', 'memoria', 'memorias', 'monitor',
+    'monitores', 'motherboard', 'motherboards', 'mouse', 'para', 'pc',
+    'placa', 'portatil', 'printer', 'procesador', 'procesadores', 'psu',
+    'ram', 'red', 'redes', 'router', 'ssd', 'storage', 'tablet', 'tablets',
+    'tarjeta', 'teclado', 'teclados', 'telefono', 'telefonos', 'webcam',
+}
+
+BRAND_QUERY_TOKENS = {
+    'acer', 'amd', 'apple', 'asus', 'benq', 'brother', 'canon', 'corsair',
+    'crucial', 'dell', 'epson', 'g', 'gigabyte', 'google', 'hp', 'huawei',
+    'hyperx', 'intel', 'kingston', 'lenovo', 'lg', 'logitech', 'msi',
+    'nintendo', 'nvidia', 'pny', 'razer', 'samsung', 'seagate', 'sony',
+    'steelseries', 'tp', 'western', 'wd', 'xiaomi', 'zotac',
+}
+
+
 def normalize(text: str) -> str:
     text = str(text or '').replace('™', '').replace('®', '')
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode().lower()
@@ -178,6 +205,21 @@ def product_type(product: dict) -> str | None:
     if re.search(r'\b(ssd|hdd|nvme|solid state|unidad de estado solido)\b', text):
         return 'storage'
     return None
+
+
+def has_catalog_identity(query: str) -> bool:
+    """Indica si una consulta identifica un producto, no una familia amplia.
+
+    Una marca sola (``Xiaomi``) no tiene tipo de artículo y una consulta como
+    ``Audífonos Xiaomi`` solo expresa tipo + marca. Ambas pueden encontrar
+    resultados, pero no deben crear ni reutilizar un producto del catálogo
+    porque una única relación producto/tienda mezclaría modelos distintos.
+    """
+    kind = product_type({'name': query})
+    if kind not in TECHNOLOGY_CATEGORIES:
+        return False
+    identity_tokens = set(canonical(query).split()) - GENERIC_QUERY_TOKENS - BRAND_QUERY_TOKENS
+    return bool(identity_tokens)
 
 
 def technology_identity_matches(detected: dict, candidate: dict) -> bool:

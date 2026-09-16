@@ -87,12 +87,10 @@ def capacity_equivalents(capacity_gb: int) -> frozenset[int]:
 
 def _first_match(text: str, patterns: dict[str, str]) -> str | None:
     normalized = canonical(text)
-    matches = []
-    for order, (value, expression) in enumerate(patterns.items()):
-        found = re.search(expression, normalized)
-        if found:
-            matches.append((found.start(), order, value))
-    return min(matches)[2] if matches else None
+    for value, expression in patterns.items():
+        if re.search(expression, normalized):
+            return value
+    return None
 
 
 BRAND_PATTERNS = {
@@ -163,7 +161,7 @@ def extract_attributes(text: str, category: str | None) -> dict[str, object]:
 
     if category == "storage":
         interface = _first_match(normalized, {
-            "nvme": r"nvme\b", "sata": r"sata(?:\s*(?:iii|3))?\b",
+            "nvme": r"\bnvme\b", "sata": r"\bsata(?:\s*(?:iii|3))?\b",
             "sas": r"\bsas\b", "usb": r"\busb\b",
         })
         if interface:

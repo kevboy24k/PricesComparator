@@ -1,6 +1,6 @@
 import unittest
 
-from core.product_matcher import classify_match, match, normalize
+from core.product_matcher import classify_match, has_catalog_identity, match, normalize
 from core.technology_catalog import build_search_profile
 from live_ingest import relevant
 
@@ -150,6 +150,14 @@ class AutomaticMatchingTests(unittest.TestCase):
         self.assertEqual(self.result('', '')['classification'], 'omitido')
         self.assertFalse(relevant({'name': ''}, ''))
         self.assertEqual(normalize('RTX™ 5070®'), 'rtx 5070')
+
+    def test_brand_or_category_only_queries_cannot_be_catalog_products(self):
+        for query in ('Xiaomi', 'Audifonos', 'Audifonos Xiaomi', 'Monitor LG'):
+            with self.subTest(query=query):
+                self.assertFalse(has_catalog_identity(query))
+        for query in ('Audifonos Xiaomi Redmi Buds 6', 'SSD SATA 500GB', 'PC HP 32GB RAM 1TB SSD'):
+            with self.subTest(query=query):
+                self.assertTrue(has_catalog_identity(query))
 
 
 if __name__ == '__main__':

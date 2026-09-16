@@ -9,6 +9,7 @@ from core.product_matcher import (
     classify_match,
     component_models,
     incompatibility_reason,
+    has_catalog_identity,
     product_type,
     technology_identity_matches,
 )
@@ -76,6 +77,9 @@ def relevant(item: dict, query: str, profile: SearchProfile | None = None) -> bo
 
 def catalog_product(cursor, query: str, first_result: dict, profile: SearchProfile | None = None):
     # La búsqueda define la identidad; nunca una laptop devuelta en primer lugar.
+    if not has_catalog_identity(query):
+        utils.report_error("Consulta sin identidad de producto; no se crea ni reutiliza catálogo: %s", query)
+        return None
     target = {"name": query.strip(), "model": query.strip()}
     if not relevant(first_result, query, profile):
         return None

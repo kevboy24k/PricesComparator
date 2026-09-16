@@ -2,6 +2,9 @@
 
 MVP para comparar precios de tecnología en tiendas de Guatemala. Incluye frontend vanilla, API PHP 8.2/PDO, MySQL/MariaDB, historial de precios y una base para scrapers Python separados por tienda.
 
+La descripción detallada de los flujos de búsqueda, captura, validación,
+persistencia y visualización está en [docs/procesos-tecnicos.md](docs/procesos-tecnicos.md).
+
 ## Requisitos
 
 - PHP 8.2+ con PDO MySQL y Apache `mod_rewrite`.

@@ -27,8 +27,13 @@ class PacifikoScraper(StoreScraper):
             seen.add(product_url)
             image_node = card.select_one(".product-image-container img, .product-card__gallery img")
             card_text = card.get_text(" ", strip=True).lower()
+            # El texto visible se trunca en las tarjetas; data-name/title
+            # conserva las especificaciones necesarias para la validación.
+            name = (card.get("data-name") or link.get("title")
+                    or (image_node.get("alt") if image_node else None)
+                    or name_node.get_text(" ", strip=True))
             results.append({
-                "name": name_node.get_text(" ", strip=True),
+                "name": name.strip(),
                 "sku": card.get("data-id"),
                 "price": self.parse_price(price_node.get_text(" ", strip=True)),
                 "currency": "GTQ",

@@ -7,6 +7,8 @@ import mysql.connector
 from dotenv import load_dotenv
 
 from core.product_matcher import classify_match
+from core.product_matcher import product_type
+from core.technology_catalog import attributes_match, build_search_profile
 from core.utils import utils
 from stores.kemik import KemikScraper
 from stores.intelaf import IntelafScraper
@@ -72,7 +74,11 @@ def revalidate_offers(cursor, store_id: int, catalog: list[dict]) -> int:
         if not product:
             continue
         result = classify_match({"name": name, "sku": sku}, [product])
-        if result["classification"] != "automatico":
+        profile = build_search_profile(product.get("name", ""), product_type(product))
+        profile_match = (profile.category in ("ram", "storage")
+                         and product_type({"name": name}) == profile.category
+                         and attributes_match(profile, name))
+        if result["classification"] != "automatico" and not profile_match:
             cursor.execute("UPDATE producto_tienda SET estado=0 WHERE idproducto_tienda=%s", (offer_id,))
             utils.report_error("Oferta %s desactivada: %s", offer_id, result["reason"])
             invalidated += 1

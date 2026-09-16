@@ -1,6 +1,7 @@
 import unittest
 
 from core.product_matcher import classify_match, match, normalize
+from core.technology_catalog import build_search_profile
 from live_ingest import relevant
 
 
@@ -107,6 +108,16 @@ class AutomaticMatchingTests(unittest.TestCase):
             with self.subTest(query=query, name=name):
                 self.assertEqual(self.result(query, name)['classification'], 'omitido')
                 self.assertFalse(relevant({'name': name}, query))
+
+    def test_ssd_commercial_capacity_group_expands_search_without_accepting_laptops(self):
+        query = 'SSD SATA 500 GB'
+        profile = build_search_profile(query, 'storage')
+        for name in ('SSD Kingston A400 SATA 480GB 2.5', 'SSD Crucial BX500 SATA 500GB',
+                     'SSD WD Blue SATA 512GB'):
+            with self.subTest(name=name):
+                self.assertTrue(relevant({'name': name}, query, profile))
+        self.assertFalse(relevant({'name': 'SSD NVMe 500GB M.2'}, query, profile))
+        self.assertFalse(relevant({'name': 'Laptop HP con SSD SATA 500GB'}, query, profile))
 
     def test_generic_evidence_resolves_new_models_without_model_rules(self):
         query = 'G502 X'

@@ -12,7 +12,8 @@ MVP para comparar precios de tecnología en tiendas de Guatemala. Incluye fronte
 
 1. Copia `.env.example` a `.env` y completa las credenciales.
 2. Ejecuta `database/schema.sql` y después `database/seed.sql` en MySQL.
-   En una instalación existente ejecuta también `sql/20260911_categorias_tecnologicas.sql`.
+   En una instalación existente ejecuta también `sql/20260911_categorias_tecnologicas.sql` y
+   `sql/20260916_catalogo_atributos_tecnologicos.sql`.
 3. Sirve el proyecto desde Apache/XAMPP. La interfaz queda en `/PricesComparator/` y la API en `/PricesComparator/api/productos`.
 4. Para probar la base de scrapers: `cd scrapers && pip install -r requirements.txt && python main.py kemik "Ryzen 5 7600"`.
 
@@ -71,6 +72,27 @@ más económica entre las compatibles (o la más económica agotada si no hay di
 En cada ingesta se revalidan las asociaciones activas de la tienda; las inválidas se
 desactivan sin borrar precios históricos. Las ofertas válidas pueden reactivarlas y
 actualizan la imagen de los productos creados automáticamente.
+
+## Catálogo de atributos tecnológicos
+
+`scrapers/core/technology_catalog.py` centraliza los atributos relevantes de cada
+categoría tecnológica y `categoria_atributo` los deja disponibles en la base para
+administración e integraciones futuras de IA. Cada oferta aceptada conserva los
+atributos detectados, su confianza y origen (`regla`, `ia` o `manual`) en
+`producto_tienda_atributo`.
+
+Los perfiles se aplican a todas las categorías del catálogo: componentes,
+equipos, monitores, periféricos, red, impresión, móviles, consolas, gabinetes,
+fuentes, refrigeración y accesorios. Solo se validan los atributos que el usuario
+incluye en la consulta; por ejemplo, un monitor puede exigir tamaño, resolución,
+Hz y panel, mientras una fuente puede exigir watts y certificación.
+
+Las equivalencias comerciales de capacidad se habilitan únicamente para SSD y
+RAM: una consulta `SSD SATA 500 GB` busca 480, 500 y 512 GB, pero mantiene SATA
+como requisito y descarta NVMe, laptops, PCs, combos y accesorios. Los monitores
+también expanden sinónimos de resolución (`Full HD`/`FHD`/`1080p`/`1920x1080`,
+por ejemplo). La capacidad y especificación real detectada se conserva por oferta;
+una equivalencia solo amplía la búsqueda, no modifica sus datos.
 
 Pruebas de regresión, con tiendas y base de datos simuladas:
 

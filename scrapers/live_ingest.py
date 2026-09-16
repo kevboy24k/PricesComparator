@@ -13,6 +13,13 @@ from core.product_matcher import (
     technology_identity_matches,
 )
 from core.utils import utils
+from core.technology_catalog import (
+    SearchProfile,
+    attributes_match,
+    build_search_profile,
+    offer_attribute_rows,
+    query_variants,
+)
 from ingest import connect_db, load_catalog, revalidate_offers, valid_offer, SCRAPERS
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
@@ -22,13 +29,22 @@ def query_tokens(query: str) -> list[str]:
     return canonical(query).split()
 
 
-def relevant(item: dict, query: str) -> bool:
+def relevant(item: dict, query: str, profile: SearchProfile | None = None) -> bool:
     target = {"name": query, "model": query}
     kind = product_type(target)
     item_kind = product_type(item)
     if not canonical(query) or item_kind not in TECHNOLOGY_CATEGORIES:
         return False
-    if incompatibility_reason(item, target):
+    incompatibility = incompatibility_reason(item, target)
+    # La única incompatibilidad que puede resolverse por una equivalencia del
+    # perfil es la capacidad comercial. Tipo, interfaz, modelo y variante no
+    # se relajan nunca.
+    if incompatibility:
+        if (incompatibility == "Capacidad diferente o sin confirmar"
+                and profile and kind in ("ram", "storage")
+                and item_kind == kind and profile.category == kind
+                and attributes_match(profile, item.get("name", ""))):
+            return True
         return False
     if kind in ("cpu", "gpu"):
         if classify_match(item, [target])["classification"] != "automatico":
@@ -40,19 +56,28 @@ def relevant(item: dict, query: str) -> bool:
             # Los modelos se validaron por separado (RTX5070 / RTX 5070, 7600X / 7600 X).
             remaining = re.sub(r"\b" + re.escape(model) + r"\b", "", remaining)
         if identity and remaining == canonical(query):
-            return all(token in canonical(item.get("name")) for token in query_tokens(query))
-        return all(token in canonical(item.get("name")).split() for token in remaining.split())
+            matched = all(token in canonical(item.get("name")) for token in query_tokens(query))
+        else:
+            matched = all(token in canonical(item.get("name")).split() for token in remaining.split())
+        return matched and (not profile or profile.category != kind or attributes_match(profile, item.get("name", "")))
+    # RAM y almacenamiento admiten equivalencias comerciales de capacidad.
+    # La categoría ya fue validada arriba, por lo que una laptop nunca puede
+    # pasar esta ruta aunque anuncie RAM o SSD en sus especificaciones.
+    if profile and kind in ("ram", "storage") and profile.category == kind:
+        return attributes_match(profile, item.get("name", ""))
     if kind in TECHNOLOGY_CATEGORIES:
-        return technology_identity_matches(item, target)
+        if not technology_identity_matches(item, target):
+            return False
+        return not profile or profile.category != kind or attributes_match(profile, item.get("name", ""))
     # Para modelos o marcas que no aparecen en reglas predefinidas, la
     # evidencia del identificador del producto decide la coincidencia.
     return classify_match(item, [target])["classification"] == "automatico"
 
 
-def catalog_product(cursor, query: str, first_result: dict):
+def catalog_product(cursor, query: str, first_result: dict, profile: SearchProfile | None = None):
     # La búsqueda define la identidad; nunca una laptop devuelta en primer lugar.
     target = {"name": query.strip(), "model": query.strip()}
-    if not relevant(first_result, query):
+    if not relevant(first_result, query, profile):
         return None
     catalog = load_catalog(cursor)
     result = classify_match(target, catalog)
@@ -64,9 +89,12 @@ def catalog_product(cursor, query: str, first_result: dict):
     kind = product_type(target) or product_type(first_result)
     # Solo se agregan categorías tecnológicas reconocidas. A diferencia de
     # CPU/GPU, RAM y almacenamiento se identifican por DDR/capacidad/interfaz.
+    profile_match = (profile is not None and kind in ("ram", "storage")
+                     and profile.category == kind and attributes_match(profile, first_result.get("name", "")))
     if kind not in TECHNOLOGY_CATEGORIES or (
         product_type(target) in TECHNOLOGY_CATEGORIES
         and kind not in ("cpu", "gpu")
+        and not profile_match
         and not technology_identity_matches(first_result, target)
     ):
         utils.report_error("Búsqueda tecnológica sin identidad verificable: %s", query)
@@ -133,9 +161,13 @@ def save_review_candidate(cursor, store_id: int, item: dict, score: float) -> No
     )
 
 
-def save_offer(cursor, store_id: int, product: dict, item: dict):
+def save_offer(cursor, store_id: int, product: dict, item: dict, profile: SearchProfile | None = None):
     result = classify_match(item, [product])
-    if not valid_offer(item) or result['classification'] != 'automatico':
+    profile_match = (profile is not None and profile.category in ("ram", "storage")
+                     and product_type(product) == profile.category
+                     and product_type(item) == profile.category
+                     and attributes_match(profile, item.get("name", "")))
+    if not valid_offer(item) or (result['classification'] != 'automatico' and not profile_match):
         utils.report_error('Oferta inválida para %s: %s', product['name'], result['reason'])
         raise ValueError('La oferta no corresponde inequívocamente al producto')
     cursor.execute(
@@ -149,6 +181,15 @@ def save_offer(cursor, store_id: int, product: dict, item: dict):
     cursor.execute("SELECT idproducto_tienda FROM producto_tienda WHERE idproducto=%s AND idtienda=%s",
                    (product["idproducto"], store_id))
     product_store_id = cursor.fetchone()[0]
+    for code, value_text, value_number, unit in offer_attribute_rows(item.get("name", ""), profile.category if profile else product_type(product)):
+        cursor.execute(
+            "INSERT INTO producto_tienda_atributo "
+            "(idproducto_tienda,codigo,valor_texto,valor_numero,unidad,confianza,fuente) "
+            "VALUES (%s,%s,%s,%s,%s,%s,'regla') "
+            "ON DUPLICATE KEY UPDATE valor_texto=VALUES(valor_texto),valor_numero=VALUES(valor_numero),"
+            "unidad=VALUES(unidad),confianza=VALUES(confianza),extraido_en=NOW()",
+            (product_store_id, code, value_text, value_number, unit, 1.0),
+        )
     if item.get("price") is not None:
         available = int(bool(item.get("available")))
         cursor.execute("SELECT precio,disponible FROM precio WHERE idproducto_tienda=%s ORDER BY fecha DESC,idprecio DESC LIMIT 1",
@@ -168,6 +209,8 @@ def run(query: str, stores=None) -> dict:
     cursor = db.cursor()
     summary = {"query": query, "stores": {}, "created": 0, "offers": 0, "skipped": 0,
                "invalidated": 0, "review": 0}
+    profile = build_search_profile(query, product_type({"name": query}))
+    search_terms = query_variants(query, profile)
     try:
         for store, scraper_class in SCRAPERS.items():
             if stores is not None and store not in stores:
@@ -182,12 +225,17 @@ def run(query: str, stores=None) -> dict:
             found = saved = skipped = invalidated = created = review = 0
             cursor.execute("SAVEPOINT ingesta_tienda")
             try:
-                raw_results = scraper_class(delay=1.5).search(query)
+                results_by_url = {}
+                for search_term in search_terms:
+                    for item in scraper_class(delay=1.5).search(search_term):
+                        key = item.get("url") or f"{item.get('name')}|{item.get('price')}"
+                        results_by_url.setdefault(key, item)
+                raw_results = list(results_by_url.values())
                 invalidated = revalidate_offers(cursor, store_id, load_catalog(cursor))
                 found = len(raw_results)
                 results = []
                 for item in raw_results:
-                    if valid_offer(item) and relevant(item, query):
+                    if valid_offer(item) and relevant(item, query, profile):
                         results.append(item)
                     else:
                         skipped += 1
@@ -203,13 +251,17 @@ def run(query: str, stores=None) -> dict:
                 if results:
                     cursor.execute("SELECT COUNT(*) FROM producto")
                     before = cursor.fetchone()[0]
-                    product = catalog_product(cursor, query, results[0])
+                    product = catalog_product(cursor, query, results[0], profile)
                     cursor.execute("SELECT COUNT(*) FROM producto")
                     created = max(0, cursor.fetchone()[0] - before)
                     for item in results:
                         result = classify_match(item, [product]) if product else None
-                        if not saved and result and result["classification"] == "automatico":
-                            save_offer(cursor, store_id, product, item)
+                        profile_variant = (profile.category in ("ram", "storage") and product
+                                           and product_type(product) == profile.category
+                                           and product_type(item) == profile.category
+                                           and attributes_match(profile, item.get("name", "")))
+                        if not saved and result and (result["classification"] == "automatico" or profile_variant):
+                            save_offer(cursor, store_id, product, item, profile)
                             saved += 1
                         else:
                             skipped += 1

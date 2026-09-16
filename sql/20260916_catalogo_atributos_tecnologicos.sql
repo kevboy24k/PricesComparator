@@ -1,7 +1,41 @@
-USE compara_tech_gt;
-INSERT IGNORE INTO categoria (nombre) VALUES ('Procesadores'),('Tarjetas gráficas'),('Memorias RAM'),('SSD'),('Motherboards'),('Monitores'),('Laptops'),('Computadoras de escritorio'),('Teclados'),('Mouse'),('Audio y audífonos'),('Webcams'),('Redes'),('Impresoras'),('Tablets'),('Celulares'),('Consolas y videojuegos'),('Gabinetes'),('Fuentes de poder'),('Refrigeración'),('Accesorios tecnológicos');
-INSERT IGNORE INTO marca (nombre) VALUES ('AMD'),('NVIDIA'),('Kingston'),('Samsung');
-INSERT IGNORE INTO tienda (nombre,url,logo) VALUES ('Kemik','https://www.kemik.gt',''),('Intelaf','https://www.intelaf.com',''),('Pacifiko','https://www.pacifiko.com','');
+-- 2026-09-16: Catálogo de atributos por categoría y atributos extraídos de cada oferta.
+-- Ejecutar una vez en instalaciones existentes después de seleccionar la base compara_tech_gt.
+
+use compara_tech_gt;
+
+CREATE TABLE IF NOT EXISTS categoria_atributo (
+    idcategoria_atributo INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    idcategoria INT UNSIGNED NOT NULL,
+    codigo VARCHAR(80) NOT NULL,
+    nombre VARCHAR(120) NOT NULL,
+    tipo_valor ENUM('texto','numero','decimal','booleano','lista') NOT NULL DEFAULT 'texto',
+    unidad VARCHAR(20) NULL,
+    comparador ENUM('exacto','equivalente','rango','texto') NOT NULL DEFAULT 'exacto',
+    requerido_busqueda TINYINT(1) NOT NULL DEFAULT 0,
+    descripcion VARCHAR(500) NULL,
+    estado TINYINT(1) NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_categoria_atributo (idcategoria,codigo),
+    CONSTRAINT fk_categoria_atributo_categoria FOREIGN KEY (idcategoria)
+        REFERENCES categoria(idcategoria) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS producto_tienda_atributo (
+    idproducto_tienda_atributo BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    idproducto_tienda INT UNSIGNED NOT NULL,
+    codigo VARCHAR(80) NOT NULL,
+    valor_texto VARCHAR(255) NULL,
+    valor_numero DECIMAL(14,3) NULL,
+    unidad VARCHAR(20) NULL,
+    confianza DECIMAL(5,4) NOT NULL DEFAULT 1.0000,
+    fuente ENUM('regla','ia','manual') NOT NULL DEFAULT 'regla',
+    extraido_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_producto_tienda_atributo (idproducto_tienda,codigo),
+    CONSTRAINT fk_producto_tienda_atributo_oferta FOREIGN KEY (idproducto_tienda)
+        REFERENCES producto_tienda(idproducto_tienda) ON DELETE CASCADE,
+    INDEX idx_pta_codigo_numero (codigo,valor_numero),
+    INDEX idx_pta_codigo_texto (codigo,valor_texto)
+) ENGINE=InnoDB;
+
 INSERT IGNORE INTO categoria_atributo (idcategoria,codigo,nombre,tipo_valor,unidad,comparador,requerido_busqueda,descripcion)
 SELECT c.idcategoria,a.codigo,a.nombre,a.tipo_valor,a.unidad,a.comparador,a.requerido_busqueda,a.descripcion
 FROM categoria c
@@ -62,6 +96,7 @@ JOIN (
     SELECT 'Accesorios tecnológicos','accessory_type','Tipo','texto',NULL,'exacto',0,'Cable, adaptador, soporte, funda u otro' UNION ALL
     SELECT 'Accesorios tecnológicos','compatibility','Compatibilidad','texto',NULL,'texto',0,'Equipo o estándar compatible'
 ) a ON a.categoria=c.nombre;
+
 INSERT IGNORE INTO categoria_atributo (idcategoria,codigo,nombre,tipo_valor,unidad,comparador,requerido_busqueda,descripcion)
 SELECT c.idcategoria,a.codigo,a.nombre,a.tipo_valor,a.unidad,a.comparador,a.requerido_busqueda,a.descripcion
 FROM categoria c
@@ -121,7 +156,3 @@ JOIN (
     SELECT 'Accesorios tecnológicos','model','Modelo','texto',NULL,'exacto',1,'Modelo del accesorio' UNION ALL
     SELECT 'Accesorios tecnológicos','connection','Conexión','texto',NULL,'exacto',0,'USB, HDMI, Bluetooth u otra'
 ) a ON a.categoria=c.nombre;
-INSERT IGNORE INTO producto (idcategoria,idmarca,nombre,modelo,sku_global,imagen,descripcion) VALUES (1,1,'AMD Ryzen 5 7600','7600','AMD-RYZEN-5-7600','https://placehold.co/480x360/e8f0ff/21457a?text=Ryzen+5+7600','Procesador AMD de 6 núcleos para socket AM5.');
-INSERT IGNORE INTO producto_especificacion (idproducto,atributo,valor) VALUES (1,'Núcleos','6'),(1,'Hilos','12'),(1,'Socket','AM5'),(1,'Frecuencia','3.8 GHz');
-INSERT IGNORE INTO producto_tienda (idproducto,idtienda,nombre_tienda,sku_tienda,url,imagen,disponibilidad) VALUES (1,1,'AMD Ryzen 5 7600 3.8GHz AM5','K-R57600','https://www.kemik.gt','https://placehold.co/480x360/e8f0ff/21457a?text=Ryzen+5+7600',1),(1,2,'Procesador AMD R5-7600 AM5','I-R57600','https://www.intelaf.com','https://placehold.co/480x360/e8f0ff/21457a?text=Ryzen+5+7600',1),(1,3,'Ryzen 5 7600 AMD','P-R57600','https://www.pacifiko.com','https://placehold.co/480x360/e8f0ff/21457a?text=Ryzen+5+7600',1);
-INSERT INTO precio (idproducto_tienda,precio,moneda,disponible,fecha) VALUES (1,1649,'GTQ',1,DATE_SUB(NOW(),INTERVAL 30 DAY)),(1,1599,'GTQ',1,DATE_SUB(NOW(),INTERVAL 20 DAY)),(1,1649,'GTQ',1,NOW()),(2,1699,'GTQ',1,DATE_SUB(NOW(),INTERVAL 30 DAY)),(2,1749,'GTQ',1,DATE_SUB(NOW(),INTERVAL 14 DAY)),(2,1699,'GTQ',1,NOW()),(3,1899,'GTQ',1,DATE_SUB(NOW(),INTERVAL 30 DAY)),(3,1790,'GTQ',1,DATE_SUB(NOW(),INTERVAL 10 DAY)),(3,1790,'GTQ',1,NOW());

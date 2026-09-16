@@ -45,6 +45,7 @@ def canonical(text: str) -> str:
     text = re.sub(r'\b(i[3579])\s*(?=\d)', r'\1 ', text)
     text = re.sub(r'\b(ryzen\s+[3579])\s+(\d{4}[a-z0-9]*)\s+pro\b', r'\1 pro \2', text)
     text = re.sub(r'\b(\d+)\s+(gb|tb)\b', r'\1\2', text)
+    text = re.sub(r'\b(\d+)\s+(hz|fps|dpi|w|mm)\b', r'\1\2', text)
     return re.sub(r'\s+', ' ', text).strip()
 
 
@@ -82,7 +83,7 @@ def storage_interfaces(text: str) -> set[str]:
     interfaces = set()
     if re.search(r'\bnvme\b', normalized):
         interfaces.add('nvme')
-    if re.search(r'\bsata\b', normalized):
+    if re.search(r'sata\b', normalized):
         interfaces.add('sata')
     if re.search(r'\bm\s*2\b|\bm2\b', normalized):
         interfaces.add('m2')
@@ -98,6 +99,13 @@ def product_type(product: dict) -> str | None:
         r'carcasa|backplate|pasta termica|refrigeracion|enfriador)\b', text
     )
     primary = re.search(r'\b(procesador|processor|cpu|ryzen|i[3579]|core|rtx|gtx|rx|arc|tarjeta|graphics card)\b', text)
+    cooling_component = re.search(r'\b(?:cooler master|cooler|disipador|heatsink)\b', text)
+    cooling_context = re.search(r'\b(?:cpu|procesador|am[45]|lga\s*\d+|radiador|\d{2,3}\s*mm)\b', text)
+    included_with_primary = (primary and cooling_component and primary.start() < cooling_component.start()
+                             and re.search(r'\b(con|with|incluye|includes|incluido)\b', text[primary.start():cooling_component.start()]))
+    if (re.search(r'\b(refrigeracion(?: liquida)?|liquid cooling|water cooling|aio)\b', text)
+            or (cooling_component and cooling_context)) and not included_with_primary and not re.search(r'\bwaterblock\b', text):
+        return 'cooling'
     if accessory:
         included_cooling = (primary and primary.start() < accessory.start()
                             and accessory[0] in ('cooler', 'disipador', 'heatsink', 'ventilador')
@@ -123,7 +131,7 @@ def product_type(product: dict) -> str | None:
             return 'computer'
         if primary and computer.start() < primary.start():
             return 'computer'
-    if re.search(r'\b(monitores?|pantalla)\b', text):
+    if re.search(r'\b(monitor(?:es)?|pantallas?)\b', text):
         return 'monitor'
     if re.search(r'\b(teclado|keyboard)\b', text):
         return 'keyboard'
@@ -135,17 +143,17 @@ def product_type(product: dict) -> str | None:
         return 'webcam'
     if re.search(r'\b(router|switch|access point|punto de acceso|wifi|wi fi|redes?)\b', text):
         return 'network'
-    if re.search(r'\b(impresora|printer|multifuncional)\b', text):
+    if re.search(r'\b(impresoras?|printers?|multifuncional(?:es)?)\b', text):
         return 'printer'
     if re.search(r'\b(tablet|ipad)\b', text):
         return 'tablet'
     if re.search(r'\b(celular|smartphone|iphone|samsung galaxy|xiaomi redmi|google pixel)\b', text):
         return 'phone'
-    if re.search(r'\b(playstation|xbox|nintendo switch|consola)\b', text):
+    if re.search(r'\b(playstation|ps[45]|xbox|nintendo switch|consola)\b', text):
         return 'console'
     if re.search(r'\b(gabinete|chasis|case)\b', text):
         return 'case'
-    if re.search(r'\b(fuente de poder|power supply|psu)\b', text):
+    if re.search(r'\b(fuentes?(?: de poder)?|power supply|psu)\b', text):
         return 'power_supply'
     if re.search(r'\b(refrigeracion|liquid cooling|water cooling)\b', text):
         return 'cooling'
